@@ -1,7 +1,11 @@
 from fastapi import FastAPI
+from app.models import User
 
 app = FastAPI()
 
-@app.get("/")
-def health_check():
-    return {"status": "running"}
+users = []
+
+@app.post("/users")
+def create_user(user: User):
+    users.append(user)
+    return user
