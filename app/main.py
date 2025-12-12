@@ -9,3 +9,7 @@ users = []
 def create_user(user: User):
     users.append(user)
     return user
+
+@app.get("/users")
+def get_users():
+    return users
