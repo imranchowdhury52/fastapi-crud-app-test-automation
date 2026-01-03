@@ -20,4 +20,7 @@ def test_get_users():
     assert response.status_code == 200
 
 
+def test_get_non_existing_user():
+    response = requests.get(f"{BASE_URL}/users/999")
+    assert response.status_code == 404
 
