@@ -1,10 +1,21 @@
-from fastapi import FastAPI, HTTPException
-from app.models import User
+from fastapi import Depends, FastAPI, HTTPException, Path, Response, status
 
-app = FastAPI()
+from app.auth import require_token
+from app.models import User, UserIn
+from app.store import DuplicateEmailError, UserStore
 
-# In-memory storage
-users = []
+app = FastAPI(title="Users API", version="1.1.0")
+store = UserStore()
+
+UserId = Path(ge=1, description="User ID, starting at 1")
+
+
+def not_found():
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+
+
+def email_taken():
+    return HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
 
 @app.get("/")
@@ -12,40 +23,42 @@ def health_check():
     return {"status": "running"}
 
 
-@app.post("/users", status_code=201)
-def create_user(user: User):
-    user.id = len(users) + 1
-    users.append(user)
+@app.get("/users", response_model=list[User])
+def get_users():
+    return store.list()
+
+
+@app.get("/users/{user_id}", response_model=User)
+def get_user(user_id: int = UserId):
+    user = store.get(user_id)
+    if user is None:
+        raise not_found()
     return user
 
 
-@app.get("/users")
-def get_users():
-    return users
+@app.post("/users", response_model=User, status_code=status.HTTP_201_CREATED,
+          dependencies=[Depends(require_token)])
+def create_user(user: UserIn):
+    try:
+        return store.create(user)
+    except DuplicateEmailError:
+        raise email_taken()
 
 
-@app.get("/users/{user_id}")
-def get_user(user_id: int):
-    for user in users:
-        if user.id == user_id:
-            return user
-    raise HTTPException(status_code=404, detail="User not found")
+@app.put("/users/{user_id}", response_model=User, dependencies=[Depends(require_token)])
+def update_user(user: UserIn, user_id: int = UserId):
+    try:
+        updated = store.replace(user_id, user)
+    except DuplicateEmailError:
+        raise email_taken()
+    if updated is None:
+        raise not_found()
+    return updated
 
 
-@app.put("/users/{user_id}")
-def update_user(user_id: int, updated_user: User):
-    for index, user in enumerate(users):
-        if user.id == user_id:
-            updated_user.id = user_id
-            users[index] = updated_user
-            return updated_user
-    raise HTTPException(status_code=404, detail="User not found")
-
-
-@app.delete("/users/{user_id}", status_code=204)
-def delete_user(user_id: int):
-    for user in users:
-        if user.id == user_id:
-            users.remove(user)
-            return
-    raise HTTPException(status_code=404, detail="User not found")
+@app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT,
+            dependencies=[Depends(require_token)])
+def delete_user(user_id: int = UserId):
+    if not store.delete(user_id):
+        raise not_found()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
